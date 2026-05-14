@@ -1,7 +1,9 @@
 ---
 name: "✨ Feature Request"
-about: "Suggest a new feature or improvement"
+about: "Suggest a new feature or improvement for ZerithDB"
+title: "[FEAT] "
 labels: ["enhancement"]
+assignees: ""
 ---
 
 ## Problem Statement
@@ -11,6 +13,10 @@ labels: ["enhancement"]
 ## Proposed Solution
 
 <!-- What should ZerithDB do? Be specific. -->
+
+## Use Cases
+
+<!-- How would a developer use this feature? -->
 
 ## API Design (if applicable)
 
