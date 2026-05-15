@@ -692,7 +692,8 @@ export default function LandingPage() {
             <Link href="/pricing" className="hover:text-gray-900 transition-colors">
               Pricing
             </Link>
-            <a href="#" className="hover:text-gray-900 transition-colors">
+            <a href="#"
+              className="hover:text-gray-900 transition-colors">
               Discord
             </a>
           </div>
