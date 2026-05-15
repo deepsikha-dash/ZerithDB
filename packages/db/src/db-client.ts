@@ -1,4 +1,4 @@
-import { migrations } from "./migrations";
+import { upgradeDocument } from "./migrations";
 import Dexie, { type Table } from "dexie";
 import { v7 as uuidv7 } from "uuid";
 import type {
@@ -10,20 +10,6 @@ import type {
 } from "zerithdb-core";
 import { ZerithDBError, ErrorCode } from "zerithdb-core";
 const CURRENT_SCHEMA_VERSION = 1;
-function upgradeDocument<T extends Record<string, any>>(
-  doc: Document<T>
-): Document<T> {
-  let currentDoc = { ...doc };
-
-  for (const migration of migrations) {
-    if (currentDoc._schemaVersion === migration.fromVersion) {
-      currentDoc = migration.migrate(currentDoc);
-      currentDoc._schemaVersion = migration.toVersion;
-    }
-  }
-
-  return currentDoc;
-}
 
 /**
  * A handle to a single named collection within the ZerithDB local database.
