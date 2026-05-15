@@ -9,6 +9,7 @@ export type Document<T extends Record<string, any> = Record<string, any>> = T & 
   _id: DocumentId;
   _createdAt: number; // Unix ms
   _updatedAt: number; // Unix ms
+  _schemaVersion?: number;
 };
 
 /**

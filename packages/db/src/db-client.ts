@@ -1,3 +1,4 @@
+import { migrations } from "./migrations";
 import Dexie, { type Table } from "dexie";
 import { v7 as uuidv7 } from "uuid";
 import type {
@@ -8,6 +9,21 @@ import type {
   UpdateSpec,
 } from "zerithdb-core";
 import { ZerithDBError, ErrorCode } from "zerithdb-core";
+const CURRENT_SCHEMA_VERSION = 1;
+function upgradeDocument<T extends Record<string, any>>(
+  doc: Document<T>
+): Document<T> {
+  let currentDoc = { ...doc };
+
+  for (const migration of migrations) {
+    if (currentDoc._schemaVersion === migration.fromVersion) {
+      currentDoc = migration.migrate(currentDoc);
+      currentDoc._schemaVersion = migration.toVersion;
+    }
+  }
+
+  return currentDoc;
+}
 
 /**
  * A handle to a single named collection within the ZerithDB local database.
@@ -31,6 +47,7 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
       _id: id,
       _createdAt: now,
       _updatedAt: now,
+      _schemaVersion: CURRENT_SCHEMA_VERSION,
     };
 
     try {
@@ -55,6 +72,7 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
       _id: uuidv7(),
       _createdAt: now,
       _updatedAt: now,
+      _schemaVersion: CURRENT_SCHEMA_VERSION,
     })) as Document<T>[];
 
     try {
@@ -82,7 +100,9 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
   async find(filter: QueryFilter<T> = {}): Promise<Document<T>[]> {
     try {
       const all = await this.table.toArray();
-      return all.filter((doc) => this.matchesFilter(doc, filter));
+      return all
+  .filter((doc) => this.matchesFilter(doc, filter))
+  .map(upgradeDocument);
     } catch (err) {
       throw new ZerithDBError(
         ErrorCode.DB_READ_FAILED,
@@ -97,7 +117,8 @@ export class CollectionClient<T extends Record<string, any> = Record<string, any
    */
   async findById(id: string): Promise<Document<T> | undefined> {
     try {
-      return await this.table.get(id);
+      const doc = await this.table.get(id);
+      return doc ? upgradeDocument(doc) : undefined;
     } catch (err) {
       throw new ZerithDBError(
         ErrorCode.DB_READ_FAILED,
