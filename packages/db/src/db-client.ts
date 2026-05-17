@@ -1,5 +1,4 @@
 import { upgradeDocument } from "./migrations";
-import Dexie, { type Table } from "dexie";
 import Dexie, { type Table, liveQuery } from "dexie";
 import { v7 as uuidv7 } from "uuid";
 import type {
@@ -11,6 +10,8 @@ import type {
 } from "zerithdb-core";
 import { ZerithDBError, ErrorCode } from "zerithdb-core";
 const CURRENT_SCHEMA_VERSION = 1;
+import { wrapIDBOperation } from "./internal/wrap-idb-operation";
+import type { BackupExportOptions, BackupSnapshot } from "./backup";
 
 /**
  * A handle to a single named collection within the ZerithDB local database.
