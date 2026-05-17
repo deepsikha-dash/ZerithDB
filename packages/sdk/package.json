@@ -56,6 +56,14 @@
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"
   },
+  "peerDependencies": {
+    "zod": "^3.x"
+  },
+  "peerDependenciesMeta": {
+    "zod": {
+      "optional": true
+    }
+  },
   "files": [
     "dist",
     "src"
