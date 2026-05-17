@@ -39,7 +39,25 @@ describe("DbClient — CollectionClient", () => {
       expect(docs).toHaveLength(1);
       expect(docs[0]?._id).toBe(id);
       expect(docs[0]?.text).toBe("world");
-    });
+      }); 
+      it("should return empty array when collection has no documents", async () => {
+  const col = db.collection<{ text: string }>("empty");
+
+  const docs = await col.find({});
+
+  expect(docs).toEqual([]);
+});
+
+it("should insert multiple documents correctly", async () => {
+  const col = db.collection<{ text: string }>("todos");
+
+  await col.insert({ text: "one" });
+  await col.insert({ text: "two" });
+
+  const docs = await col.find({});
+
+  expect(docs.length).toBe(2);
+});
 
     it("should add _createdAt and _updatedAt timestamps", async () => {
       const before = Date.now();
