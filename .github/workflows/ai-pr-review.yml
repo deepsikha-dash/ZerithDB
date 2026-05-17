@@ -1,4 +1,4 @@
-name: 🤖 AI Code Review
+name: 🤖 AI Code Review & Labeler
 
 # Uses pull_request_target so it runs with repo secrets even for fork PRs.
 # We never checkout PR code here — only fetch the diff via API — so this is safe.
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   ai-review:
-    name: Gemini AI Review
+    name: Groq AI Review & Label
     runs-on: ubuntu-latest
     # Skip review if the PR author is the maintainer themselves
     if: github.event.pull_request.user.login != 'arpittkhandelwal'
@@ -31,15 +31,15 @@ jobs:
             > pr.diff
           echo "Diff size: $(wc -c < pr.diff) bytes, $(wc -l < pr.diff) lines"
 
-      - name: Generate AI review via Gemini
+      - name: Generate AI review via Groq
         id: generate
         run: |
           python3 << 'PYEOF'
           import json, os, urllib.request, urllib.error, re, sys
 
-          # Read and truncate diff to fit Gemini context window
+          # Read and truncate diff to fit context window
           with open('pr.diff', 'r', errors='replace') as f:
-              diff = f.read()[:28000]
+              diff = f.read()[:20000]
 
           pr_title  = os.environ.get('PR_TITLE', '')
           pr_body   = (os.environ.get('PR_BODY', '') or '')[:2000]
@@ -65,6 +65,11 @@ Review this PR thoroughly. Focus on:
 - Test coverage adequacy
 - Code style and consistency with the codebase
 
+Also, analyze the PR and suggest appropriate GitHub labels. Common labels include:
+- Types: `bug`, `enhancement`, `type:docs`, `type:refactor`, `type:testing`, `type:chore`
+- Levels: `level:beginner`, `level:intermediate`, `level:advanced`, `level:critical`
+- Packages: `package:core`, `package:db`, `package:sync`, `package:network`, `package:auth`, `package:cli`, `package:web`
+
 Respond ONLY with valid JSON — no markdown, no extra text:
 {{
   "verdict": "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
@@ -78,7 +83,8 @@ Respond ONLY with valid JSON — no markdown, no extra text:
   ],
   "positives": ["specific things done well"],
   "key_suggestion": "the single most important improvement to make, or empty string",
-  "safe_to_merge": true | false
+  "safe_to_merge": true | false,
+  "suggested_labels": ["label1", "label2"]
 }}
 
 Verdict rules:
@@ -87,25 +93,29 @@ Verdict rules:
 - COMMENT: only minor/nitpick issues or just observations
 PYEOF
 
-          api_key = os.environ.get('GEMINI_API_KEY', '')
+          api_key = os.environ.get('GROQ_API_KEY', '')
           if not api_key:
-              print("ERROR: GEMINI_API_KEY secret not set", file=sys.stderr)
+              print("ERROR: GROQ_API_KEY secret not set", file=sys.stderr)
               sys.exit(1)
 
-          url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+          url = "https://api.groq.com/openai/v1/chat/completions"
           payload = {
-              "contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {
-                  "temperature": 0.15,
-                  "maxOutputTokens": 2048,
-                  "responseMimeType": "application/json"
-              }
+              "model": "llama3-70b-8192",
+              "messages": [
+                  {"role": "system", "content": "You are a helpful senior code reviewer. You strictly output JSON."},
+                  {"role": "user", "content": prompt}
+              ],
+              "temperature": 0.1,
+              "response_format": {"type": "json_object"}
           }
 
           req = urllib.request.Request(
               url,
               data=json.dumps(payload).encode(),
-              headers={"Content-Type": "application/json"},
+              headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type": "application/json"
+              },
               method="POST"
           )
 
@@ -113,36 +123,72 @@ PYEOF
               with urllib.request.urlopen(req, timeout=60) as resp:
                   data = json.load(resp)
           except urllib.error.HTTPError as e:
-              print(f"Gemini API error {e.code}: {e.read().decode()}", file=sys.stderr)
+              print(f"Groq API error {e.code}: {e.read().decode()}", file=sys.stderr)
               sys.exit(1)
 
-          text = data['candidates'][0]['content']['parts'][0]['text']
+          text = data['choices'][0]['message']['content']
 
-          # Parse JSON (Gemini may wrap in code fences)
+          # Parse JSON (Groq may wrap in code fences even with json_object)
           match = re.search(r'\{[\s\S]*\}', text)
           if match:
               review = json.loads(match.group())
           else:
-              review = {
-                  "verdict": "COMMENT",
-                  "summary": text[:500],
-                  "issues": [],
-                  "positives": [],
-                  "key_suggestion": "",
-                  "safe_to_merge": False
-              }
+              try:
+                  review = json.loads(text)
+              except:
+                  review = {
+                      "verdict": "COMMENT",
+                      "summary": "Failed to parse AI response as JSON.\n\n" + text[:500],
+                      "issues": [],
+                      "positives": [],
+                      "key_suggestion": "",
+                      "safe_to_merge": False,
+                      "suggested_labels": []
+                  }
 
           with open('review.json', 'w') as f:
               json.dump(review, f, indent=2)
 
-          print(f"✅ Review generated — verdict: {review.get('verdict')}, safe_to_merge: {review.get('safe_to_merge')}")
+          print(f"✅ Review generated — verdict: {review.get('verdict')}, safe_to_merge: {review.get('safe_to_merge')}, labels: {review.get('suggested_labels')}")
           PYEOF
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
           PR_TITLE:       ${{ github.event.pull_request.title }}
           PR_BODY:        ${{ github.event.pull_request.body }}
           PR_AUTHOR:      ${{ github.event.pull_request.user.login }}
           PR_NUMBER:      ${{ github.event.pull_request.number }}
+
+      - name: Apply labels
+        run: |
+          python3 << 'PYEOF'
+          import json, subprocess, os
+
+          with open('review.json') as f:
+              r = json.load(f)
+
+          labels = r.get('suggested_labels', [])
+          if not labels:
+              print("No labels suggested by AI.")
+              exit(0)
+
+          pr   = os.environ['PR_NUMBER']
+          repo = os.environ['GITHUB_REPOSITORY']
+
+          print(f"Applying labels: {labels}")
+          cmd = ['gh', 'pr', 'edit', pr, '--repo', repo]
+          for label in labels:
+              cmd.extend(['--add-label', label])
+
+          result = subprocess.run(cmd, capture_output=True, text=True)
+          if result.returncode != 0:
+              print(f"Failed to apply labels: {result.stderr}")
+          else:
+              print("✅ Labels applied successfully")
+          PYEOF
+        env:
+          GH_TOKEN:            ${{ secrets.PAT_TOKEN }}
+          PR_NUMBER:           ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY:   ${{ github.repository }}
 
       - name: Post review comment
         run: |
@@ -158,6 +204,7 @@ PYEOF
           positives  = r.get('positives', [])
           suggestion = r.get('key_suggestion', '')
           safe       = r.get('safe_to_merge', False)
+          labels     = r.get('suggested_labels', [])
 
           VERDICT_ICON = {'APPROVE': '✅', 'REQUEST_CHANGES': '❌', 'COMMENT': '💬'}
           SEV_ICON     = {'critical': '🔴', 'major': '🟠', 'minor': '🟡', 'nitpick': '🔵'}
@@ -168,6 +215,9 @@ PYEOF
               f"> {summary}",
               "",
           ]
+
+          if labels:
+              lines += [f"🏷️ **Auto-applied labels:** {', '.join(f'`{l}`' for l in labels)}", ""]
 
           if positives:
               lines += ["### ✨ Strengths", ""]
@@ -191,7 +241,7 @@ PYEOF
               "---",
               f"{merge_line}  ",
               "",
-              "_🤖 Automated review by [Gemini AI](https://deepmind.google/gemini/) · ZerithDB CI Pipeline_",
+              "_🤖 Automated review by [Groq AI](https://groq.com/) · ZerithDB CI Pipeline_",
           ]
 
           body   = "\n".join(lines)
